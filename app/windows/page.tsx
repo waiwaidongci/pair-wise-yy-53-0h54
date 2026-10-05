@@ -1,8 +1,9 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Box, Flex, Grid, Heading, Text, Badge, Button, Input, Select, Checkbox, Table, Thead, Tbody, Tr, Th, Td, useToast, HStack } from '@chakra-ui/react'
-import { useRightsStore, useConflicts } from '@/store/rights'
+import { Box, Flex, Grid, Heading, Text, Badge, Button, Input, Select, Checkbox, Table, Thead, Tbody, Tr, Th, Td, useToast, HStack, Link } from '@chakra-ui/react'
+import NextLink from 'next/link'
+import { useRightsStore, useConflicts, useChains } from '@/store/rights'
 import type { Territory } from '@/lib/types'
 
 const territories: (Territory | '全部地区')[] = ['全部地区', '中国大陆', '中国香港', '中国台湾', '新加坡', '马来西亚', '北美']
@@ -18,8 +19,11 @@ export default function WindowsPage() {
   const [shiftDays, setShiftDays] = useState(7)
   const toast = useToast()
   const conflicts = useConflicts()
+  const chains = useChains()
+  const chainByParent = useMemo(() => new Map(chains.map((chain) => [chain.parent.id, chain])), [chains])
   const filtered = useMemo(() => selectedTerritory === '全部地区' ? windows : windows.filter((item) => item.territory === selectedTerritory), [windows, selectedTerritory])
   const selected = windows.find((item) => item.id === selectedWindowId)
+  const selectedChain = selected ? chainByParent.get(selected.id) : undefined
 
   function validateAndSave() {
     if (!selected) return
@@ -34,7 +38,10 @@ export default function WindowsPage() {
       <Grid templateColumns={{ base: '1fr', xl: 'minmax(0,1.1fr) minmax(360px,.8fr)' }} gap={4}>
         <Box bg="white" border="1px solid" borderColor="gray.200" borderRadius="8px" overflow="hidden">
           <Flex p={4} justify="space-between" align="center"><Heading size="md">授权窗口清单</Heading><HStack><Select size="sm" w="110px" value={shiftDays} onChange={(event) => setShiftDays(Number(event.target.value))}><option value={7}>+7 天</option><option value={14}>+14 天</option><option value={-7}>-7 天</option><option value={-14}>-14 天</option></Select><Button size="sm" onClick={() => { if (!selectedIds.length) return toast({ title: '请选择窗口', status: 'warning' }); batchShift(selectedIds, shiftDays) }}>批量调窗</Button></HStack></Flex>
-          <Table size="sm"><Thead><Tr><Th w="36px"></Th><Th>作品 / 渠道</Th><Th>地区</Th><Th>开始</Th><Th>结束</Th><Th>独占</Th></Tr></Thead><Tbody>{filtered.map((item) => <Tr key={item.id} bg={selectedWindowId === item.id ? 'blue.50' : undefined} cursor="pointer" onClick={() => selectWindow(item.id)}><Td onClick={(event) => event.stopPropagation()}><Checkbox isChecked={selectedIds.includes(item.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /></Td><Td><Text fontWeight="600">{item.work}</Text><Text color="gray.500" fontSize="xs">{item.channel} · {item.id}</Text></Td><Td>{item.territory}</Td><Td>{item.start}</Td><Td>{item.end}</Td><Td><Badge colorScheme={item.exclusive ? 'purple' : 'gray'}>{item.exclusive ? '独占' : '普通'}</Badge></Td></Tr>)}</Tbody></Table>
+          <Table size="sm"><Thead><Tr><Th w="36px"></Th><Th>作品 / 渠道</Th><Th>地区</Th><Th>开始</Th><Th>结束</Th><Th>独占</Th><Th>转授权 / 链</Th></Tr></Thead><Tbody>{filtered.map((item) => {
+            const chain = chainByParent.get(item.id)
+            return <Tr key={item.id} bg={selectedWindowId === item.id ? 'blue.50' : undefined} cursor="pointer" onClick={() => selectWindow(item.id)}><Td onClick={(event) => event.stopPropagation()}><Checkbox isChecked={selectedIds.includes(item.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} /></Td><Td><Text fontWeight="600">{item.work}</Text><Text color="gray.500" fontSize="xs">{item.channel} · {item.id} · rev {item.revision}</Text></Td><Td>{item.territory}</Td><Td>{item.start}</Td><Td>{item.end}</Td><Td><Badge colorScheme={item.exclusive ? 'purple' : 'gray'}>{item.exclusive ? '独占' : '普通'}</Badge></Td><Td>{item.sublicense ? <HStack><Badge colorScheme="green">转授权开</Badge>{chain && chain.children.length > 0 && <Badge colorScheme={chain.invalidCount ? 'red' : chain.draftCount ? 'orange' : 'blue'}>{chain.children.length} 个次级{chain.invalidCount ? ` · ${chain.invalidCount} 失效` : ''}</Badge>}</HStack> : <Badge colorScheme="gray">未开转授权</Badge>}</Td></Tr>
+          })}</Tbody></Table>
         </Box>
         <Box bg="white" border="1px solid" borderColor="gray.200" borderRadius="8px" p={5}>
           <Heading size="md" mb={1}>窗口条款</Heading><Text color="gray.500" fontSize="sm" mb={4}>{selected?.id ?? '请选择窗口'}</Text>
@@ -44,8 +51,26 @@ export default function WindowsPage() {
             <Box><Text fontSize="sm" mb={1}>结束日期</Text><Input type="date" value={selected.end} onChange={(event) => updateWindow(selected.id, { end: event.target.value })} /></Box>
             <Box><Text fontSize="sm" mb={1}>优先顺序</Text><Input type="number" value={selected.priority} onChange={(event) => updateWindow(selected.id, { priority: Number(event.target.value) })} /></Box>
             <Box><Text fontSize="sm" mb={1}>地区</Text><Select value={selected.territory} onChange={(event) => updateWindow(selected.id, { territory: event.target.value as Territory })}>{territories.filter((item) => item !== '全部地区').map((territory) => <option key={territory}>{territory}</option>)}</Select></Box>
-            <Checkbox isChecked={selected.exclusive} onChange={(event) => updateWindow(selected.id, { exclusive: event.target.checked })}>独占窗口</Checkbox><Checkbox isChecked={selected.sublicense} onChange={(event) => updateWindow(selected.id, { sublicense: event.target.checked })}>允许次级授权</Checkbox>
+            <Checkbox isChecked={selected.exclusive} onChange={(event) => updateWindow(selected.id, { exclusive: event.target.checked })}>独占窗口</Checkbox><Checkbox isChecked={selected.sublicense} onChange={(event) => updateWindow(selected.id, { sublicense: event.target.checked })}>允许次级授权（转授权）</Checkbox>
           </Grid>}
+          {selected && selectedChain && (
+            <Box mt={4} p={3} bg={selected.sublicense ? 'blue.50' : 'red.50'} borderLeft="3px solid" borderLeftColor={selected.sublicense ? 'blue.400' : 'red.500'} borderRadius="4px">
+              <Flex justify="space-between" align="center" mb={selectedChain.children.length ? 1 : 0}>
+                <Text fontWeight="700" fontSize="sm">授权链结论：{selectedChain.conclusion}</Text>
+                <Link as={NextLink} href="/chains" fontSize="xs" color="brand.600">前往授权链 →</Link>
+              </Flex>
+              {!selected.sublicense
+                ? <Text fontSize="xs" color="red.700" mt={1}>转授权已关闭，该母窗口下 {selectedChain.children.length} 个次级窗口整链失效；重新开启且边界仍包含时可恢复。</Text>
+                : selectedChain.children.length === 0
+                  ? <Text fontSize="xs" color="gray.600" mt={1}>转授权已开启，可到「授权链」页登记下游次级窗口；日期、地区、独占均不得超出本母窗口。</Text>
+                  : <Box mt={1}>{selectedChain.children.map((child) => (
+                    <Flex key={child.id} justify="space-between" fontSize="xs" py={0.5}>
+                      <Text>↳ {child.subChannel} · {child.territory} · {child.start}~{child.end}</Text>
+                      <Badge colorScheme={child.status === '生效中' ? 'green' : child.status === '草稿-冲突' ? 'orange' : 'red'}>{child.status}</Badge>
+                    </Flex>
+                  ))}</Box>}
+            </Box>
+          )}
           {selected && conflicts.filter((issue) => issue.windowIds.includes(selected.id)).map((issue) => <Box key={issue.id} mt={4} p={3} bg={issue.severity === '高' ? 'red.50' : 'orange.50'} borderLeft="3px solid" borderLeftColor={issue.severity === '高' ? 'red.500' : 'orange.400'}><Text fontWeight="700" fontSize="sm">{issue.type}</Text><Text fontSize="sm" color="gray.600" mt={1}>{issue.explanation}</Text></Box>)}
           <Button w="100%" mt={5} colorScheme="blue" onClick={validateAndSave}>保存并重新校验</Button>
         </Box>

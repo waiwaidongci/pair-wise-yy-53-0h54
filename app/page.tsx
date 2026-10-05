@@ -2,7 +2,7 @@
 
 import { Box, Flex, Grid, Heading, Text, Badge, Button, Table, Thead, Tbody, Tr, Th, Td, Progress } from '@chakra-ui/react'
 import Link from 'next/link'
-import { useRightsStore, useConflicts } from '@/store/rights'
+import { useRightsStore, useConflicts, useChains } from '@/store/rights'
 import { trpc } from '@/trpc/client'
 
 export default function Dashboard() {
@@ -10,18 +10,23 @@ export default function Dashboard() {
   const comments = useRightsStore((state) => state.comments)
   const version = useRightsStore((state) => state.version)
   const conflicts = useConflicts()
+  const chains = useChains()
   const catalog = trpc.catalog.useQuery()
+  const activeSubs = chains.reduce((sum, chain) => sum + chain.activeCount, 0)
+  const invalidSubs = chains.reduce((sum, chain) => sum + chain.invalidCount, 0)
+  const draftSubs = chains.reduce((sum, chain) => sum + chain.draftCount, 0)
+  const reviewSubs = chains.reduce((sum, chain) => sum + chain.reviewCount, 0)
   const cards = [
     { label: '授权窗口', value: windows.length, note: `${catalog.data?.works.length ?? 2} 部作品` },
-    { label: '责任地区', value: new Set(windows.map((item) => item.territory)).size, note: '联动地区矩阵' },
+    { label: '授权链', value: chains.length, note: `次级生效 ${activeSubs} · 失效 ${invalidSubs}` },
     { label: '高优先级冲突', value: conflicts.filter((item) => item.severity === '高').length, note: '阻止审批通过' },
-    { label: '当前草案', value: `v${version}`, note: '自动保留本地版本' },
+    { label: '当前草案', value: `v${version}`, note: `链上草稿 ${draftSubs} · 待核验 ${reviewSubs}` },
   ]
   return (
     <Box>
       <Flex justify="space-between" align="flex-start" gap={4} mb={5} direction={{ base: 'column', md: 'row' }}>
         <Box><Text color="brand.600" fontSize="xs" fontWeight="bold">版权窗口与独占规则</Text><Heading fontSize={{ base: '2xl', md: '3xl' }} my={1}>授权窗口审阅总览</Heading><Text color="gray.600">联动核验时间、地区、渠道、权利类型与独占范围，修改在审批前保留完整版本。</Text></Box>
-        <Flex gap={2}><Button as={Link} href="/reviews" variant="outline">比较版本</Button><Button as={Link} href="/windows" colorScheme="blue">调整窗口</Button></Flex>
+        <Flex gap={2}><Button as={Link} href="/chains" variant="outline">授权链</Button><Button as={Link} href="/reviews" variant="outline">比较版本</Button><Button as={Link} href="/windows" colorScheme="blue">调整窗口</Button></Flex>
       </Flex>
       <Grid templateColumns={{ base: 'repeat(2,1fr)', lg: 'repeat(4,1fr)' }} gap={4} mb={5}>
         {cards.map((card) => <Box key={card.label} bg="white" border="1px solid" borderColor="gray.200" borderLeft="4px solid" borderLeftColor="brand.500" borderRadius="8px" p={4}><Text color="gray.500" fontSize="sm">{card.label}</Text><Heading size="lg" my={1}>{card.value}</Heading><Text color="gray.500" fontSize="xs">{card.note}</Text></Box>)}
@@ -44,6 +49,24 @@ export default function Dashboard() {
           <Text color="gray.500" fontSize="xs" mt={2}>规则完备度 {Math.max(0, 100 - conflicts.length * 18)}% · {comments.filter((item) => !item.resolved).length} 条意见待处理</Text>
         </Box>
       </Grid>
+      <Box bg="white" border="1px solid" borderColor="gray.200" borderRadius="8px" p={4} mb={4}>
+        <Flex justify="space-between" align="center" mb={3}>
+          <Box><Heading size="md">授权链状态</Heading><Text color="gray.500" fontSize="sm">母窗口转授权 → 次级登记 → 冲突结论</Text></Box>
+          <Button as={Link} href="/chains" size="sm" colorScheme="blue" variant="outline">管理授权链</Button>
+        </Flex>
+        <Grid templateColumns={{ base: '1fr', lg: '1fr 1fr' }} gap={3}>
+          {chains.map((chain) => (
+            <Box key={chain.parent.id} p={3} border="1px solid" borderColor="gray.100" borderRadius="6px">
+              <Flex justify="space-between" align="center" mb={1}>
+                <Text fontWeight="700" fontSize="sm">{chain.parent.work} · {chain.parent.channel} <Text as="span" color="gray.400" fontSize="xs">{chain.parent.id} · rev {chain.parent.revision}</Text></Text>
+                <Badge colorScheme={chain.conclusion === '有效' ? 'green' : chain.conclusion === '待核验' ? 'yellow' : 'red'}>{chain.conclusion}</Badge>
+              </Flex>
+              <Text fontSize="xs" color="gray.500">{chain.parent.rights} · {chain.parent.territory} · {chain.parent.start} ~ {chain.parent.end} · {chain.parent.sublicense ? '转授权开启' : '转授权关闭·整链失效'}</Text>
+              <Text fontSize="xs" mt={1} color="gray.600">次级 {chain.children.length} 个：生效 {chain.activeCount}，失效 {chain.invalidCount}，草稿 {chain.draftCount}，待核验 {chain.reviewCount}</Text>
+            </Box>
+          ))}
+        </Grid>
+      </Box>
       <Box bg="white" border="1px solid" borderColor="gray.200" borderRadius="8px" overflow="hidden">
         <Flex p={4} justify="space-between"><Heading size="md">待决授权条款</Heading><Button size="sm" variant="ghost">查看全部</Button></Flex>
         <Table size="sm"><Thead><Tr><Th>作品 / 渠道</Th><Th>权利</Th><Th>地区</Th><Th>窗口</Th><Th>独占</Th><Th>状态</Th></Tr></Thead><Tbody>{windows.map((item) => <Tr key={item.id}><Td><Text fontWeight="600">{item.work}</Text><Text color="gray.500" fontSize="xs">{item.channel} · {item.id}</Text></Td><Td>{item.rights}</Td><Td>{item.territory}</Td><Td>{item.start} → {item.end}</Td><Td><Badge colorScheme={item.exclusive ? 'purple' : 'gray'}>{item.exclusive ? '独占' : '非独占'}</Badge></Td><Td><Badge colorScheme={item.status === '冲突' ? 'red' : item.status === '已确认' ? 'green' : 'orange'}>{item.status}</Badge></Td></Tr>)}</Tbody></Table>
